@@ -1,0 +1,6 @@
+class RPGTask:
+    def __init__(self):
+        ...
+
+    def start(self) -> None:
+        ...

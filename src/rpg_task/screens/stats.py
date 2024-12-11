@@ -1,0 +1,1 @@
+# https://www.bolshoyvopros.ru/questions/3168584-kak-v-igrah-nazyvaetsja-ekran-na-kotorom-pokazyvaetsja-informacija.html
