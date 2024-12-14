@@ -1,6 +1,9 @@
-class RPGTask:
-    def __init__(self):
-        ...
+"""Собственно класс, отвечающий за запуск экранов."""
 
-    def start(self) -> None:
-        ...
+
+class RPGTask:
+	def __init__(self):
+		...
+
+	def start(self) -> None:
+		...

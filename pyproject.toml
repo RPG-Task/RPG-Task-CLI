@@ -6,7 +6,7 @@ authors = ["Petr Rudichev <petrrudichev@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.8.0"
 rich = "^13.9.4"
 
 
