@@ -1,7 +1,8 @@
-from typing import Callable, Hashable, List
-from weakref import ref
+from typing import Callable, Hashable, List, Tuple, Generator
+from weakref import ref, ReferenceType
 
-from .errors import SignalTypeError
+from .errors import SignalTypeError, DispatcherKeyError
+from .saferef import safe_ref, BoundMethodWeakRef
 
 
 class _Parameter:
@@ -22,8 +23,9 @@ Any = _Any()
 Anonymous = _Anonymous()
 
 Handler = Callable[[Event], None]
+WEAKREF_TYPES = (ReferenceType, BoundMethodWeakRef)
 
-connection = {}
+connections = {}
 senders = {}
 senders_back = {}
 
@@ -45,23 +47,25 @@ def connect(handler: Handler, signal: Hashable = Any, sender: object = Any, weak
 		raise SignalTypeError(f"Сигнал не может быть None. ({handler=}, {signal=})")
 
 	if weak:
-		...
+		handler = safe_ref(handler, on_delete=_remove_handler)
 
 	sender_key = id(sender)
 
-	if sender_key in connection:
-		signals = connection[sender_key]
+	if sender_key in connections:
+		signals = connections[sender_key]
 	else:
-		connection[sender_key] = signals = {}
+		connections[sender_key] = signals = {}
 
 	if sender not in (Any, Anonymous, None):
+		# noinspection PyUnusedLocal
 		def remove(object, senderkey=sender_key):
 			_remove_sender(sender_key=senderkey)
 
 		try:
 			weak_sender = ref(sender, remove)
 			senders[sender_key] = weak_sender
-		except: ...
+		except:
+			...
 
 	handler_key = id(handler)
 
@@ -82,23 +86,152 @@ def connect(handler: Handler, signal: Hashable = Any, sender: object = Any, weak
 	handlers.append(handler)
 
 
+def disconnect(handler: Handler, signal: Hashable = Any, sender: object = Any, weak: bool = True) -> None:
+	"""
+
+	:param handler:
+	:param signal:
+	:param sender:
+	:param weak:
+	:return:
+	"""
+
+	if signal is None:
+		raise SignalTypeError(f"Сигнал не может быть None. ({handler=}, {signal=})")
+	if weak:
+		handler = safe_ref(handler)
+
+	sender_key = id(sender)
+
+	try:
+		signals = connections[sender_key]
+		handlers = signals[signal]
+	except KeyError:
+		raise DispatcherKeyError(f"Не найдено получателей для сигнала {signal} от отправителя {sender}.")
+
+	try:
+		_remove_old_back_refs(sender_key, signal, handler, handlers)
+	except ValueError:
+		raise DispatcherKeyError(f"Нет подключения к приемнику {handler} для получения "
+								 f"сигнала {signal} от отправителя {sender}.")
+
+	_cleanup_connections(sender_key, signal)
+
+
+def send(event: Event, signal: Hashable = Any, sender: object = Any) -> List[Tuple[Handler, Any]]:
+	responses = []
+	for handler in live_handlers(get_all_handlers(sender, signal)):
+		response = handler(event)
+		responses.append((handler, response))
+	return responses
+
+
+def get_handlers(sender: object = Any, signal: Hashable = Any) -> List:
+	try:
+		return connections[id(sender)][signal]
+	except KeyError:
+		return []
+
+
+def live_handlers(handlers: Generator[Handler]) -> Generator[Handler]:
+	for handler in handlers:
+		if isinstance(handler, WEAKREF_TYPES):
+			handler = handler()
+			if handler is not None:
+				yield handler
+		else:
+			yield handler
+
+
+def get_all_handlers(sender: object = Any, signal: Hashable = Any) -> Generator[Handler]:
+	handlers = {}
+
+	for set in (
+			get_handlers(sender, signal), get_handlers(sender=sender),
+			get_handlers(signal=signal), get_handlers()
+	):
+		for handler in set:
+			if handler:
+				try:
+					if handler not in handlers:
+						handlers[handler] = 1
+						yield handler
+				except TypeError:
+					...
+
+
+def _remove_handler(handler: Handler) -> bool:
+	"""Отключает приёмник от подключений."""
+	if not senders_back:
+		return False
+
+	back_key = id(handler)
+
+	try:
+		back_set = senders_back.pop(back_key)
+	except KeyError:
+		return False
+	else:
+		for sender_key in back_set:
+			try:
+				signals = list(connections[sender_key].keys())
+			except KeyError:
+				...
+			else:
+				for signal in signals:
+					try:
+						handlers = connections[sender_key][signal]
+					except KeyError:
+						...
+					else:
+						try:
+							handlers.remove(handler)
+						except:
+							...
+					_cleanup_connections(sender_key, signal)
+
+
+def _cleanup_connections(sender_key: int, signal: Hashable):
+	"""Удаляет все пустые сигналы для sender_key. Удаляет sender_key, если он пустой."""
+	try:
+		handlers = connections[sender_key][signal]
+	except:
+		...
+	else:
+		if not handlers:
+			# Никаких подключённых приёмников нет, можно удалять сигнал.
+			try:
+				signals = connections[sender_key]
+			except KeyError:
+				...
+			else:
+				del signals[signal]
+				if not signals:
+					# Больше нет никаких сигнальных соединений, можно удалять отправителя.
+					_remove_sender(sender_key)
+
+
 def _remove_sender(sender_key: int) -> None:
 	"""Удаляет sender_key из подключений."""
 	_remove_back_refs(sender_key)
 
-	try: del connection[sender_key]
-	except KeyError: ...
+	try:
+		del connections[sender_key]
+	except KeyError:
+		...
 
-	try: del senders[sender_key]
-	except: ...
+	try:
+		del senders[sender_key]
+	except:
+		...
 
 
 def _remove_back_refs(sender_key: int) -> None:
 	"""Удаляет обратные ссылки на sender_key."""
 	try:
-		signals = connection[sender_key]
+		signals = connections[sender_key]
 	except KeyError:
-		signals = None
+		...
 	else:
 		items = signals.items()
 
@@ -117,12 +250,16 @@ def _kill_back_ref(handler: Handler, sender_key: int) -> bool:
 	set: dict = senders_back.get(handler_key, {})
 
 	while sender_key in set:
-		try: set.remove(sender_key)
-		except: break
+		try:
+			set.remove(sender_key)
+		except:
+			break
 
 	if not set:
-		try: del senders_back[handler_key]
-		except KeyError: ...
+		try:
+			del senders_back[handler_key]
+		except KeyError:
+			...
 
 	return True
 
@@ -137,10 +274,10 @@ def _remove_old_back_refs(sender_key: int, signal: Hashable, handler: Handler, h
 		del handlers[index]
 
 		flag = False
-		signals = connection.get(signal)
+		signals = connections.get(signal)
 
 		if signals is not None:
-			for s, hands in connection.get(signal, {}).items():
+			for s, hands in connections.get(signal, {}).items():
 				if s != signal:
 					for hand in hands:
 						if hand is old_handler:
