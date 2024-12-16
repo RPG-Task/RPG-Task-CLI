@@ -30,7 +30,7 @@ senders = {}
 senders_back = {}
 
 
-def connect(handler: Handler, signal: Hashable = Any, sender: object = Any, weak: bool = True) -> None:
+def subscribe(handler: Handler, signal: Hashable = Any, sender: object = Any, weak: bool = True) -> None:
 	"""Подключает обработчик к отправителю сигнала.
 
 	:param handler: Функция, которая будет принимать объект Event.
@@ -86,7 +86,7 @@ def connect(handler: Handler, signal: Hashable = Any, sender: object = Any, weak
 	handlers.append(handler)
 
 
-def disconnect(handler: Handler, signal: Hashable = Any, sender: object = Any, weak: bool = True) -> None:
+def unsubscribe(handler: Handler, signal: Hashable = Any, sender: object = Any, weak: bool = True) -> None:
 	"""
 
 	:param handler:
