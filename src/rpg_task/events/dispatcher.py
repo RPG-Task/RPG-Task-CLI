@@ -1,8 +1,8 @@
 from typing import Callable, Hashable, List, Tuple, Generator
 from weakref import ref, ReferenceType
 
-from .errors import SignalTypeError, DispatcherKeyError
-from .saferef import safe_ref, BoundMethodWeakRef
+from errors import SignalTypeError, DispatcherKeyError
+from saferef import safe_ref, BoundMethodWeakRef
 
 
 class _Parameter:
@@ -133,7 +133,7 @@ def get_handlers(sender: object = Any, signal: Hashable = Any) -> List:
 		return []
 
 
-def live_handlers(handlers: Generator[Handler]) -> Generator[Handler]:
+def live_handlers(handlers: Generator[Handler, None, None]) -> Generator[Handler, None, None]:
 	for handler in handlers:
 		if isinstance(handler, WEAKREF_TYPES):
 			handler = handler()
@@ -143,7 +143,7 @@ def live_handlers(handlers: Generator[Handler]) -> Generator[Handler]:
 			yield handler
 
 
-def get_all_handlers(sender: object = Any, signal: Hashable = Any) -> Generator[Handler]:
+def get_all_handlers(sender: object = Any, signal: Hashable = Any) -> Generator[Handler, None, None]:
 	handlers = {}
 
 	for set in (
